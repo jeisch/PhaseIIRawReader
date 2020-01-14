@@ -13,43 +13,103 @@ bool PhaseIIRawReader::Initialise(std::string configfile, DataModel &data){
   /////////////////////////////////////////////////////////////////
 
   m_variables.Get("verbose",verbose);
-  m_variables.Get("InputFile",inputfile);
-  
-  Log("RawDataStore");
   RawDataStore = new BoostStore(false,0);
-  RawDataStore->Initialise(inputfile.c_str());
-  RawDataStore->Print(false);
-  Log("RunInfoStore");
-  m_data->Stores["RunInfoStore"] = new BoostStore(false,0);
-  RawDataStore->Get("RunInformation",*m_data->Stores["RunInfoStore"]);
-  m_data->Stores["RunInfoStore"]->Print(false);
   PMTDataStore=new BoostStore(false,2);
-  if (RawDataStore->Get("PMTData",*PMTDataStore)) {
-    Log("Got PMTData");
-  }else{
-    Log("failed getting PMTData");
+  TrigDataStore=new BoostStore(false,2);
+  m_data->Stores["RunInfoStore"] = new BoostStore(false,0);
+  FileOpen = false;
+  TrigStoreEntries = 0;
+  PMTEntries = 0;
+  
+  std::string inputfile;
+  if (m_variables.Get("InputFile",inputfile)) {
+    inputfiles.push(inputfile);
+  }
+  else if (m_variables.Get("InFileList",inputfile)) {
+    std::ifstream filelist(inputfile.c_str());
+    std::string fname;
+    while (filelist >> fname) {
+      inputfiles.push(fname);
+      fname.clear();
+    }
+  }
+  else {
+    Log("No input file specified, quitting.");
     m_data->vars.Set("StopLoop",1);
     return false;
   }
-  PMTDataStore->Header->Print(false); 
-  PMTDataStore->Header->Get("TotalEntries",PMTEntries); 
-  cout << "PMTEntries " << PMTEntries << endl;
-  TrigDataStore=new BoostStore(false,2);
-  RawDataStore->Get("TrigData",*TrigDataStore);
-  TrigDataStore->Header->Get("TotalEntries",TrigEntries); 
-  cout << "TrigEntries " << TrigEntries << endl;
+  return true;
+}
+
+bool PhaseIIRawReader::OpenFile(std::string inputfile) { 
+  Log("RawDataStore");
+  currentFile = inputfile;
+  Log("initrawstore");
+  RawDataStore->Initialise(currentFile.c_str());
+  Log("Print raw store");
+  RawDataStore->Print(false);
+  RawDataStore->Get("RunInformation",*m_data->Stores["RunInfoStore"]);
+  m_data->Stores["RunInfoStore"]->Print(false);
+  if (RawDataStore->Get("PMTData",*PMTDataStore)) {
+    Log("Got PMTData");
+    PMTDataStore->Header->Get("TotalEntries",PMTEntries); 
+    cout << "PMTEntries " << PMTEntries << endl;
+  }else{
+    Log("Failed getting PMTData");
+    PMTEntries = 0;
+  }
+  if (RawDataStore->Get("TrigData",*TrigDataStore)) {
+    Log("Got TrigData");
+    TrigDataStore->Header->Get("TotalEntries",TrigStoreEntries);
+    cout << "TrigStoreEntries " << TrigStoreEntries << endl;
+  }else{
+    Log("Failed getting TrigStore.");
+    TrigStoreEntries = 0;
+  }
   currentPMTentry=0;
   currentTrigentry=0;
+  FileOpen = true;
+  return true;
+}
 
-
-
-
-
+bool PhaseIIRawReader::CloseFile() {
+  Log("Close RunInfo");
+  m_data->Stores["RunInfoStore"]->Close();
+  m_data->Stores["RunInfoStore"]->Delete();
+  Log("Close PMTDataStore");
+  if (m_data->CStore.Has("CardDataVector")) m_data->CStore.Remove("CardDataVector");
+  PMTDataStore->Close();
+  PMTDataStore->Delete();
+  Log("Close TrigDataStore");
+  if (m_data->CStore.Has("TrigData")) m_data->CStore.Remove("TrigData");
+  TrigDataStore->Close();
+  TrigDataStore->Delete();
+  Log("Close RawDataStore");
+  RawDataStore->Close();
+  Log("Delete RawDataStore");
+  RawDataStore->Delete();
+  Log("c++ delete RawDataStore");
+  delete RawDataStore;
+  Log("new RawDataStore");
+  RawDataStore = new BoostStore(false,0);
+  FileOpen = false;
   return true;
 }
 
 
 bool PhaseIIRawReader::Execute(){
+  if (FileOpen && (currentTrigentry == TrigStoreEntries)&&(currentPMTentry == PMTEntries)) {
+    CloseFile();
+  }
+  if (!FileOpen) {
+    if (!inputfiles.empty()) {
+      OpenFile(inputfiles.front());
+      inputfiles.pop();
+    }else{
+      m_data->vars.Set("StopLoop",1);
+      return true;
+    }
+  }
   if (currentPMTentry < PMTEntries) {
     Log("PMTDataStore");
     PMTDataStore->GetEntry(currentPMTentry);
@@ -64,7 +124,7 @@ bool PhaseIIRawReader::Execute(){
   }else{
     if (m_data->CStore.Has("CardDataVector")) m_data->CStore.Remove("CardDataVector");
   }
-  if (currentTrigentry < TrigEntries) {
+  if (currentTrigentry < TrigStoreEntries) {
     Log("TrigDataStore");
     TrigDataStore->GetEntry(currentTrigentry);
     ++currentTrigentry;
@@ -78,31 +138,22 @@ bool PhaseIIRawReader::Execute(){
   }else{
     if (m_data->CStore.Has("TrigData")) m_data->CStore.Remove("TrigData");
   }
-  if ((currentTrigentry == TrigEntries)&&(currentPMTentry == PMTEntries)) {
-    Log("StopLoop");
-    m_data->vars.Set("StopLoop",1);
-  }
 
   return true;
 }
 
 
 bool PhaseIIRawReader::Finalise(){
-  Log("Close RunInfo");
-  m_data->Stores["RunInfoStore"]->Close();
-  Log("Delete RunInfoStore");
+  if (FileOpen) {
+    CloseFile();
+  }
   delete m_data->Stores["RunInfoStore"];
-  Log("Close PMTDataStore");
-  PMTDataStore->Close();
   Log("Delete PMTDataStore");
   delete PMTDataStore;
-  Log("Close TrigDataStore");
-  TrigDataStore->Close();
   Log("Delete TrigDataStore");
   delete TrigDataStore;
-  Log("Close RawDataStore");
-  RawDataStore->Close();
   Log("Delete RawDataStore");
+  RawDataStore->Delete();
   delete RawDataStore;
   Log("Done with Finalise()");
   return true;

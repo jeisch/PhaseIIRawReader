@@ -10,6 +10,8 @@
 #include "TriggerData.h"
 #include "BoostStore.h"
 #include "Store.h"
+#include <queue>
+#include <string>
 
 #include <boost/serialization/vector.hpp>
 
@@ -31,21 +33,21 @@ class PhaseIIRawReader: public Tool {
   bool Initialise(std::string configfile,DataModel &data); ///< Initialise Function for setting up Tool resources. @param configfile The path and name of the dynamic configuration file to read in. @param data A reference to the transient data class used to pass information between Tools.
   bool Execute(); ///< Execute function used to perform Tool purpose.
   bool Finalise(); ///< Finalise function used to clean up resources.
-
+  bool OpenFile(std::string);
+  bool CloseFile();
 
  private:
-
+  bool FileOpen;
+  std::string currentFile;
   BoostStore *RawDataStore = nullptr;
   BoostStore *PMTDataStore = nullptr;
   BoostStore *TrigDataStore = nullptr;
+  unsigned long PMTEntries;
+  unsigned long TrigStoreEntries;
   unsigned long currentPMTentry;
   unsigned long currentTrigentry;
   int verbose;
-  std::string inputfile;
-  unsigned long PMTEntries;
-  unsigned long TrigEntries;
-
-
+  std::queue<std::string> inputfiles;
 
 
 
